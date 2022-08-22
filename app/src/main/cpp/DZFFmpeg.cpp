@@ -179,7 +179,7 @@ void DZFFmpeg::prepare(ThreadMode threadMode) {
     }
 
     // 不是我的事我不干，
-    pVideo = new DZVideo(videoStreamIndex,pJniCall,pPlayerStatus);
+    pVideo = new DZVideo(videoStreamIndex,pJniCall,pPlayerStatus,pAudio);
     pVideo->analysisStream(threadMode,pFormatContext);
 
 

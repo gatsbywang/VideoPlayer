@@ -4,9 +4,9 @@
 
 #include "DZVideo.h"
 
-DZVideo::DZVideo(int videoStreamIndex, DZJNICall *pJniCall, DZPlayerStatus *pPlayerStatus) : DZMedia(
+DZVideo::DZVideo(int videoStreamIndex, DZJNICall *pJniCall, DZPlayerStatus *pPlayerStatus,DZAudio *pAudio) : DZMedia(
         videoStreamIndex, pJniCall, pPlayerStatus) {
-
+    this->pAudio = pAudio;
 }
 
 DZVideo::~DZVideo() {
@@ -60,9 +60,9 @@ void *threadVideoPlay(void *context) {
                           (uint8_t *const *)(pVideo->pRgbaFrame->data),
                           pVideo->pRgbaFrame->linesize);
 
-                // 在播放之前判断一下需要休眠多久
-//                double frameSleepTime = pVideo->getFrameSleepTime(pFrame);
-//                av_usleep(frameSleepTime * 1000000);
+                // 在播放之前判断一下需要休眠多久,为了同步音频和视频
+                double frameSleepTime = pVideo->getFrameSleepTime(pFrame);
+                av_usleep(frameSleepTime * 1000000);// 微秒 10的6次方
 
                 // 把数据推到缓冲区
                 ANativeWindow_lock(pNativeWindow, &outBuffer, NULL);
@@ -104,10 +104,59 @@ void DZVideo::privateAnalysisStream(ThreadMode threadMode, AVFormatContext *pFor
     av_image_fill_arrays(const_cast<uint8_t **>(pRgbaFrame->data), pRgbaFrame->linesize, pFrameBuffer, AV_PIX_FMT_RGBA,
                          pCodecContext->width, pCodecContext->height, 1);
 
+
+    // 计算视频帧率。
+    int num = pFormatContext->streams[streamIndex]->avg_frame_rate.num;
+    int den = pFormatContext->streams[streamIndex]->avg_frame_rate.den;
+
+    if(den !=0 && num !=0){
+        defaultDelayTime = 1.0f*den/num;
+    }
+
 }
 
 void DZVideo::setSurface(jobject surface) {
     this->surface = pJniCall->jniEnv->NewGlobalRef(surface);
+}
+
+double DZVideo::getFrameSleepTime(AVFrame *pFrame) {
+
+    double  times = av_frame_get_best_effort_timestamp(pFrame)* av_q2d(timeBase);
+    if(times > currentTime){
+        currentTime = times;
+    }
+
+    // 尽量把时间 控制在视频的帧率时间范围左右，1/24,0.04  1/30  0.033
+
+    // 第一次控制0.016s 到 -0.016s
+
+    // 相差多少秒
+    double diffTime = currentTime - pAudio->currentTime;
+
+    if(diffTime > 0.016 || diffTime < -0.016){
+        if(diffTime > 0.016){
+
+            delayTime =delayTime *2/3;
+        } else if(diffTime < -0.016){
+            delayTime =delayTime *3/2;
+        }
+
+        // 第二次控制 ，defaultDelayTime *2/3 到defaultDelayTime *3/2
+        if(delayTime < defaultDelayTime/2){
+            delayTime = defaultDelayTime*2/3;
+        }else if(delayTime > defaultDelayTime *2){
+            delayTime = defaultDelayTime*3/2;
+        }
+    }
+
+    // 第三次控制，那这基本属于异常其情况
+    if(diffTime >=0.25){
+        delayTime  = 0;
+    }else if(delayTime <= -0.25){
+        delayTime = defaultDelayTime*2;
+    }
+
+    return delayTime;
 }
 
 void DZVideo::release() {

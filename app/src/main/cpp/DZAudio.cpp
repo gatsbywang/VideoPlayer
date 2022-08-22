@@ -163,6 +163,14 @@ int DZAudio::resampleAudio() {
 
                 // 每个点2个字节，双通道
                 dataSize = dataSize * 2 * 2;
+
+                // 设置下当前的时间，方便回调进度给java，方便视频同步音频
+                double times = pFrame->pts * av_q2d(timeBase);
+                if(times > currentTime ){
+                    currentTime = times;
+                }
+
+
                 LOGE("解码音频帧：%d，%d", dataSize, pFrame->nb_samples);
 
                 break;
